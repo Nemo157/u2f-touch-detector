@@ -1,0 +1,15 @@
+[package]
+name = "u2f-touch-detector"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+color-eyre = { version = "0.6.2", default-features = false, features = ["capture-spantrace"] }
+culpa = { version = "1.0.1", default-features = false }
+eyre = { version = "0.6.8", default-features = false }
+hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
+hidapi = { version = "2.6.1", default-features = false, features = ["linux-native"] }
+tracing = { version = "0.1.37", default-features = false, features = ["attributes", "std"] }
+tracing-error = { version = "0.2.0", default-features = false }
+tracing-subscriber = { version = "0.3.17", default-features = false, features = ["env-filter", "fmt", "ansi", "tracing-log"] }
+zerocopy = { version = "0.7.32", features = ["derive"] }
