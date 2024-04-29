@@ -16,21 +16,34 @@ struct Command(u8);
 
 impl Command {
     const KEEPALIVE: Self = Self(0x80 | 0x3b);
+    const MSG: Self = Self(0x80 | 0x03);
+    const CBOR: Self = Self(0x80 | 0x10);
+    const INIT: Self = Self(0x80 | 0x06);
+    const PING: Self = Self(0x80 | 0x01);
+    const CANCEL: Self = Self(0x80 | 0x11);
+    const ERROR: Self = Self(0x80 | 0x3f);
+    const WINK: Self = Self(0x80 | 0x08);
+    const LOCK: Self = Self(0x80 | 0x04);
 }
 
 impl std::fmt::Debug for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Self(seq @ 0..=0x7f) => f.debug_tuple("Command::Continuation").field(&seq).finish(),
-            Self::KEEPALIVE => f
-                .debug_tuple("Command::KeepAlive")
-                .field(&(self.0 & !0x80))
-                .finish(),
-            _ => f
-                .debug_tuple("Command::Unknown")
-                .field(&(self.0 & !0x80))
-                .finish(),
-        }
+        let value = if self.0 < 0x80 { self.0 } else { self.0 - 0x80 };
+        let name = match *self {
+            Self(0..=0x7f) => "Command::Continuation",
+            Self::KEEPALIVE => "Command::KeepAlive",
+            Self::MSG => "Command::Msg",
+            Self::CBOR => "Command::Cbor",
+            Self::INIT => "Command::Init",
+            Self::PING => "Command::Ping",
+            Self::CANCEL => "Command::Cancel",
+            Self::ERROR => "Command::Error",
+            Self::WINK => "Command::Wink",
+            Self::LOCK => "Command::Lock",
+            _ => "Command::Unknown",
+        };
+
+        f.debug_tuple(name).field(&format!("{value:#x}")).finish()
     }
 }
 
@@ -66,19 +79,20 @@ impl std::fmt::Debug for InitPacket {
 struct Status(u8);
 
 impl Status {
+    // The authenticator is still processing the current request
+    const PROCESSING: Self = Self(1);
     // The authenticator is waiting for user presence
     const UPNEEDED: Self = Self(2);
 }
 
 impl std::fmt::Debug for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Self::UPNEEDED => f
-                .debug_tuple("Status::UserPresenceNeeded")
-                .field(&self.0)
-                .finish(),
-            _ => f.debug_tuple("Status::Unknown").field(&self.0).finish(),
-        }
+        let name = match *self {
+            Self::PROCESSING => "Status::Processing",
+            Self::UPNEEDED => "Status::UserPresenceNeeded",
+            _ => "Status::Unknown",
+        };
+        f.debug_tuple(name).field(&self.0).finish()
     }
 }
 
@@ -117,7 +131,7 @@ fn process_device(device: hidapi::HidDevice) -> Result<()> {
                     _ => trace!("ignoring unhandled keepalive"),
                 }
             }
-            command => trace!("ignoring unhandled command {command:?}"),
+            command => trace!("ignoring unhandled command"),
         }
     }
 }
