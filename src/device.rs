@@ -57,7 +57,7 @@ impl Device {
     #[culpa::try_fn]
     pub(crate) fn process_messages(
         &self,
-        tx: tokio::sync::mpsc::Sender<(Arc<str>, bool)>,
+        tx: tokio::sync::broadcast::Sender<(Arc<str>, bool)>,
     ) -> Result<()> {
         let serial = self.0.get_serial_number_string()?.unwrap_or_default();
         let _guard = info_span!("device", device.serial = serial).entered();
@@ -72,7 +72,7 @@ impl Device {
                 if deadline.map(|d| Instant::now() >= d).unwrap_or(false) {
                     trace!("hit deadline, assume device gave up");
                     info!("touch no longer needed");
-                    let _ = tx.blocking_send((serial.clone(), false));
+                    let _ = tx.send((serial.clone(), false));
                     deadline = None;
                 }
                 continue;
@@ -85,7 +85,7 @@ impl Device {
                     Status::UPNEEDED => {
                         if deadline.is_none() {
                             info!("touch needed");
-                            let _ = tx.blocking_send((serial.clone(), true));
+                            let _ = tx.send((serial.clone(), true));
                         }
                         deadline = Some(Instant::now() + HYSTERESIS_DURATION);
                         channel = message.channel;
@@ -106,7 +106,7 @@ impl Device {
                 } if deadline.is_some() => {
                     trace!("received a response, clearing deadline");
                     info!("touch no longer needed");
-                    let _ = tx.blocking_send((serial.clone(), false));
+                    let _ = tx.send((serial.clone(), false));
                     deadline = None;
                 }
                 _ => trace!("ignoring unhandled command"),
