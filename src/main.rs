@@ -5,6 +5,7 @@ mod command;
 mod device;
 mod message;
 mod packet;
+mod socket;
 
 use crate::device::Device;
 
@@ -26,12 +27,18 @@ fn main() -> Result<()> {
             .with(tracing_error::ErrorLayer::default()),
     )?;
 
-    let hidapi = hidapi::HidApi::new()?;
-
     let mut threads = Vec::new();
+
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    threads.push(std::thread::spawn(move || socket::run("./socket", rx)));
+
+    let hidapi = hidapi::HidApi::new()?;
     for device in Device::find(&hidapi) {
-        let device = device?;
-        threads.push(std::thread::spawn(move || device.process_messages()));
+        threads.push(std::thread::spawn({
+            let device = device?;
+            let tx = tx.clone();
+            move || device.process_messages(tx)
+        }));
     }
 
     for thread in threads {

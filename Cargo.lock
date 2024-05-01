@@ -383,6 +383,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio"
+version = "1.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1adbebffeca75fcfd058afa480fb6c0b81e165a0323f9c9d39c9697e37c46787"
+dependencies = [
+ "backtrace",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "tracing"
 version = "0.1.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -461,6 +471,7 @@ dependencies = [
  "eyre",
  "hex",
  "hidapi",
+ "tokio",
  "tracing",
  "tracing-error",
  "tracing-subscriber",

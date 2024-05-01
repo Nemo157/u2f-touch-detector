@@ -1,5 +1,8 @@
 use eyre::Result;
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{info, info_span, trace, trace_span};
 
 use crate::command::{self, Command, Status};
@@ -52,12 +55,13 @@ impl Device {
     }
 
     #[culpa::try_fn]
-    pub(crate) fn process_messages(&self) -> Result<()> {
-        let _guard = info_span!(
-            "device",
-            device.serial = self.0.get_serial_number_string()?.unwrap_or_default()
-        )
-        .entered();
+    pub(crate) fn process_messages(
+        &self,
+        tx: tokio::sync::mpsc::Sender<(Arc<str>, bool)>,
+    ) -> Result<()> {
+        let serial = self.0.get_serial_number_string()?.unwrap_or_default();
+        let _guard = info_span!("device", device.serial = serial).entered();
+        let serial = Arc::<str>::from(serial);
 
         let mut buffer = [0; FIDO_CTAPHID_MAX_MESSAGE_SIZE];
 
@@ -68,6 +72,7 @@ impl Device {
                 if deadline.map(|d| Instant::now() >= d).unwrap_or(false) {
                     trace!("hit deadline, assume device gave up");
                     info!("touch no longer needed");
+                    let _ = tx.blocking_send((serial.clone(), false));
                     deadline = None;
                 }
                 continue;
@@ -80,6 +85,7 @@ impl Device {
                     Status::UPNEEDED => {
                         if deadline.is_none() {
                             info!("touch needed");
+                            let _ = tx.blocking_send((serial.clone(), true));
                         }
                         deadline = Some(Instant::now() + HYSTERESIS_DURATION);
                         channel = message.channel;
@@ -100,6 +106,7 @@ impl Device {
                 } if deadline.is_some() => {
                     trace!("received a response, clearing deadline");
                     info!("touch no longer needed");
+                    let _ = tx.blocking_send((serial.clone(), false));
                     deadline = None;
                 }
                 _ => trace!("ignoring unhandled command"),

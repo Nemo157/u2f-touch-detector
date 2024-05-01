@@ -7,8 +7,10 @@ only listening for u2f events, and without the yubikey branding.
 
  - [x] detect devices and get interaction needed events
  - [x] hysteresis on per-device interaction needed state
- - [ ] output to unix socket, reuse yubikey-touch-detector protocol for compat
+ - [x] output to unix socket, reuse yubikey-touch-detector protocol for compat
+   - [ ] configure socket path
  - [ ] output to desktop notification
    - [ ] configure message based on serial
  - [ ] detect devices added after startup
  - [ ] systemd configs
+   - [ ] integrate systemd socket passing
