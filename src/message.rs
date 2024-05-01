@@ -1,4 +1,4 @@
-use crate::packet::{Command, Init, Packet, FIDO_CTAPHID_MAX_RECORD_SIZE};
+use crate::packet::{Channel, Command, Init, Packet, FIDO_CTAPHID_MAX_RECORD_SIZE};
 use eyre::{bail, ensure, Result};
 use tracing::{trace, trace_span};
 
@@ -6,7 +6,7 @@ use tracing::{trace, trace_span};
 pub(crate) const FIDO_CTAPHID_MAX_MESSAGE_SIZE: usize = 127 * FIDO_CTAPHID_MAX_RECORD_SIZE;
 
 pub(crate) struct Message<'a> {
-    pub(crate) channel: [u8; 4],
+    pub(crate) channel: Channel,
     pub(crate) command: Command,
     pub(crate) payload: &'a [u8],
 }
@@ -14,7 +14,7 @@ pub(crate) struct Message<'a> {
 impl std::fmt::Debug for Message<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Message")
-            .field("channel", &hex::encode(self.channel))
+            .field("channel", &self.channel)
             .field("command", &self.command)
             .field("payload", &hex::encode(self.payload))
             .finish()
@@ -41,7 +41,6 @@ impl<'a> Message<'a> {
             break init;
         };
 
-        let _guard = trace_span!("init", ?init.channel, ?init.command).entered();
         let &Init {
             channel,
             command,
@@ -49,6 +48,9 @@ impl<'a> Message<'a> {
             ..
         } = init;
         let length = usize::from(length.get());
+
+        let _guard =
+            trace_span!("init", ?init.channel, ?init.command, init.length = length).entered();
 
         ensure!(
             length <= FIDO_CTAPHID_MAX_MESSAGE_SIZE,
@@ -71,14 +73,13 @@ impl<'a> Message<'a> {
 
             ensure!(
                 channel == continuation.channel,
-                "received continuation for different channel (expected {} != received {})",
-                hex::encode(channel),
-                hex::encode(continuation.channel)
+                "received continuation for different channel (expected {channel:?} != received {:?})",
+                continuation.channel,
             );
             ensure!(
                 sequence == continuation.sequence,
                 "received continuation with wrong sequence (expected {sequence} != received {})",
-                continuation.sequence
+                continuation.sequence,
             );
 
             buffer[offset..][..continuation.payload.len()].copy_from_slice(&continuation.payload);

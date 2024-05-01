@@ -19,7 +19,7 @@ fn process_device(device: hidapi::HidDevice) -> Result<()> {
 
     loop {
         let message = Message::read_from(&device, &mut buffer)?;
-        let _guard = trace_span!("message", ?message).entered();
+        let _guard = trace_span!("message", ?message.channel, ?message.command, message.payload = hex::encode(message.payload)).entered();
 
         match message.command {
             Command::KEEPALIVE => {
