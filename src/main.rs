@@ -1,6 +1,7 @@
 use eyre::Result;
 use tracing_subscriber::{filter::LevelFilter, layer::SubscriberExt, EnvFilter};
 
+mod command;
 mod device;
 mod message;
 mod packet;

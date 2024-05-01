@@ -1,6 +1,8 @@
 use eyre::{OptionExt, Result};
 use zerocopy::{AsBytes, FromBytes, FromZeroes, BE, U16};
 
+use crate::command;
+
 // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#usb-descriptors
 pub(crate) const FIDO_CTAPHID_MAX_RECORD_SIZE: usize = 64;
 
@@ -14,47 +16,11 @@ impl std::fmt::Debug for Channel {
     }
 }
 
-#[derive(FromZeroes, FromBytes, PartialEq, Eq, Copy, Clone)]
-#[repr(transparent)]
-pub(crate) struct CommandKind(u8);
-
-impl CommandKind {
-    pub(crate) const KEEPALIVE: Self = Self(0x80 | 0x3b);
-    pub(crate) const MSG: Self = Self(0x80 | 0x03);
-    pub(crate) const CBOR: Self = Self(0x80 | 0x10);
-    pub(crate) const INIT: Self = Self(0x80 | 0x06);
-    pub(crate) const PING: Self = Self(0x80 | 0x01);
-    pub(crate) const CANCEL: Self = Self(0x80 | 0x11);
-    pub(crate) const ERROR: Self = Self(0x80 | 0x3f);
-    pub(crate) const WINK: Self = Self(0x80 | 0x08);
-    pub(crate) const LOCK: Self = Self(0x80 | 0x04);
-}
-
-impl std::fmt::Debug for CommandKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match *self {
-            Self(0..=0x7f) => return write!(f, "invalid continuation treated as command"),
-            Self::KEEPALIVE => "KeepAlive",
-            Self::MSG => "Msg",
-            Self::CBOR => "Cbor",
-            Self::INIT => "Init",
-            Self::PING => "Ping",
-            Self::CANCEL => "Cancel",
-            Self::ERROR => "Error",
-            Self::WINK => "Wink",
-            Self::LOCK => "Lock",
-            _ => "Unknown",
-        };
-
-        write!(f, "{name}({:#x})", self.0 - 0x80)
-    }
-}
-
 #[derive(FromZeroes, FromBytes)]
 #[repr(C)]
 pub(crate) struct Init {
     pub(crate) channel: Channel,
-    pub(crate) command: CommandKind,
+    pub(crate) command: command::Kind,
     pub(crate) length: U16<BE>,
     // TODO: should be [u8], but zerocopy doesn't seem to have helpers for unsized types
     pub(crate) payload: [u8; FIDO_CTAPHID_MAX_RECORD_SIZE - 7],

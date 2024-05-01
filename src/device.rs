@@ -1,7 +1,8 @@
 use eyre::Result;
 use tracing::{info, info_span, trace, trace_span};
 
-use crate::message::{Command, Message, Status, FIDO_CTAPHID_MAX_MESSAGE_SIZE};
+use crate::command::{Command, Status};
+use crate::message::{Message, FIDO_CTAPHID_MAX_MESSAGE_SIZE};
 
 // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#usb-discovery
 const FIDO_USAGE_PAGE: u16 = 0xf1d0;
