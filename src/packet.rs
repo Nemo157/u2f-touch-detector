@@ -49,7 +49,7 @@ pub(crate) struct Init {
     pub(crate) command: Command,
     pub(crate) length: U16<BE>,
     // TODO: should be [u8], but zerocopy doesn't seem to have helpers for unsized types
-    pub(crate) payload: [u8; 57],
+    pub(crate) payload: [u8; FIDO_CTAPHID_MAX_RECORD_SIZE - 7],
 }
 
 impl std::fmt::Debug for Init {
@@ -69,7 +69,7 @@ pub(crate) struct Continuation {
     pub(crate) channel: [u8; 4],
     pub(crate) sequence: u8,
     // TODO: should be [u8], but zerocopy doesn't seem to have helpers for unsized types
-    pub(crate) payload: [u8; 59],
+    pub(crate) payload: [u8; FIDO_CTAPHID_MAX_RECORD_SIZE - 5],
 }
 
 impl std::fmt::Debug for Continuation {
@@ -89,12 +89,12 @@ pub(crate) enum Packet<'a> {
     Continuation(&'a Continuation),
 }
 
-impl Packet<'_> {
+impl<'a> Packet<'a> {
     #[culpa::try_fn]
-    pub(crate) fn read_from<'b>(
+    pub(crate) fn read_from(
         device: &hidapi::HidDevice,
-        buffer: &'b mut [u8; FIDO_CTAPHID_MAX_RECORD_SIZE],
-    ) -> Result<Packet<'b>> {
+        buffer: &'a mut [u8; FIDO_CTAPHID_MAX_RECORD_SIZE],
+    ) -> Result<Self> {
         let len = device.read(buffer)?;
         // TODO: support buffers shorter than the max
         assert_eq!(len, buffer.len());
@@ -110,7 +110,7 @@ struct RawPacket {
     channel: [u8; 4],
     sequence_or_command: u8,
     // TODO: should be [u8], but zerocopy doesn't seem to have helpers for unsized types
-    payload: [u8; 59],
+    payload: [u8; FIDO_CTAPHID_MAX_RECORD_SIZE - 5],
 }
 
 impl RawPacket {

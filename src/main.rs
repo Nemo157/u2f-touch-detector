@@ -3,9 +3,11 @@ use tracing::{info, info_span, trace, trace_span};
 use tracing_subscriber::{filter::LevelFilter, layer::SubscriberExt, EnvFilter};
 use zerocopy::FromBytes;
 
+mod message;
 mod packet;
 
-use packet::{Command, Init, KeepAlive, Packet, Status, FIDO_CTAPHID_MAX_RECORD_SIZE};
+use message::{Message, FIDO_CTAPHID_MAX_MESSAGE_SIZE};
+use packet::{Command, KeepAlive, Status};
 
 // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#usb-discovery
 const FIDO_USAGE_PAGE: u16 = 0xf1d0;
@@ -13,30 +15,25 @@ const FIDO_USAGE_CTAPHID: u16 = 0x01;
 
 #[culpa::try_fn]
 fn process_device(device: hidapi::HidDevice) -> Result<()> {
-    let mut buffer = [0; FIDO_CTAPHID_MAX_RECORD_SIZE];
+    let mut buffer = [0; FIDO_CTAPHID_MAX_MESSAGE_SIZE];
 
     loop {
-        let packet = Packet::read_from(&device, &mut buffer)?;
-        let _guard = trace_span!("packet", ?packet).entered();
+        let message = Message::read_from(&device, &mut buffer)?;
+        let _guard = trace_span!("message", ?message).entered();
 
-        match packet {
-            Packet::Init(Init {
-                command: Command::KEEPALIVE,
-                payload,
-                ..
-            }) => {
+        match message.command {
+            Command::KEEPALIVE => {
                 let keepalive =
-                    KeepAlive::ref_from(&payload[..1]).ok_or_eyre("invalid keepalive")?;
-                let _guard =
-                    trace_span!("keepalive", packet.keepalive.status = ?keepalive.status).entered();
+                    KeepAlive::ref_from(message.payload).ok_or_eyre("invalid keepalive")?;
+                let _guard = trace_span!("keepalive", message.keepalive.status = ?keepalive.status)
+                    .entered();
 
                 match keepalive.status {
                     Status::UPNEEDED => info!("touch needed"),
                     _ => trace!("ignoring unhandled keepalive"),
                 }
             }
-            Packet::Continuation(_) => trace!("ignoring continuation packet"),
-            Packet::Init(_) => trace!("ignoring unhandled command"),
+            _ => trace!("ignoring unhandled command"),
         }
     }
 }
