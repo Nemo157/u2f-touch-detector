@@ -1,7 +1,7 @@
 use eyre::{OptionExt, Result};
 use tracing::{info, info_span, trace, trace_span};
 use tracing_subscriber::{filter::LevelFilter, layer::SubscriberExt, EnvFilter};
-use zerocopy::{FromBytes, FromZeroes, BE, U16};
+use zerocopy::{AsBytes, FromBytes, FromZeroes, BE, U16};
 
 // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#usb-discovery
 const FIDO_USAGE_PAGE: u16 = 0xf1d0;
@@ -28,9 +28,8 @@ impl Command {
 
 impl std::fmt::Debug for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value = if self.0 < 0x80 { self.0 } else { self.0 - 0x80 };
         let name = match *self {
-            Self(0..=0x7f) => "Command::Continuation",
+            Self(0..=0x7f) => return write!(f, "invalid continuation treated as command"),
             Self::KEEPALIVE => "Command::KeepAlive",
             Self::MSG => "Command::Msg",
             Self::CBOR => "Command::Cbor",
@@ -43,7 +42,9 @@ impl std::fmt::Debug for Command {
             _ => "Command::Unknown",
         };
 
-        f.debug_tuple(name).field(&format!("{value:#x}")).finish()
+        f.debug_tuple(name)
+            .field(&format!("{:#x}", self.0 - 0x80))
+            .finish()
     }
 }
 
@@ -57,20 +58,65 @@ struct InitPacket {
     payload: [u8; 57],
 }
 
-impl InitPacket {
-    fn payload(&self) -> &[u8] {
-        &self.payload[..std::cmp::min(usize::from(self.length.get()), self.payload.len())]
-    }
-}
-
 impl std::fmt::Debug for InitPacket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InitPacket")
             .field("channel", &hex::encode(self.channel))
             .field("command", &self.command)
             .field("length", &self.length.get())
-            .field("payload", &hex::encode(self.payload()))
+            .field("payload", &hex::encode(self.payload))
             .finish()
+    }
+}
+
+#[derive(FromZeroes, FromBytes)]
+#[repr(C)]
+struct ContinuationPacket {
+    channel: [u8; 4],
+    sequence: u8,
+    // TODO: should be [u8], but zerocopy doesn't seem to have helpers for unsized types
+    payload: [u8; 59],
+}
+
+impl std::fmt::Debug for ContinuationPacket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContinuationPacket")
+            .field("channel", &hex::encode(self.channel))
+            .field("sequence", &self.sequence)
+            .field("payload", &hex::encode(self.payload))
+            .finish()
+    }
+}
+
+#[derive(Debug)]
+enum Packet<'a> {
+    Init(&'a InitPacket),
+    #[allow(dead_code)]
+    Continuation(&'a ContinuationPacket),
+}
+
+#[derive(FromZeroes, FromBytes, AsBytes)]
+#[repr(C)]
+struct RawPacket {
+    channel: [u8; 4],
+    sequence_or_command: u8,
+    // TODO: should be [u8], but zerocopy doesn't seem to have helpers for unsized types
+    payload: [u8; 59],
+}
+
+impl RawPacket {
+    fn classify(&self) -> Packet<'_> {
+        if self.sequence_or_command < 0x80 {
+            Packet::Continuation(ContinuationPacket::ref_from(self.as_bytes()).unwrap())
+        } else {
+            Packet::Init(InitPacket::ref_from(self.as_bytes()).unwrap())
+        }
+    }
+}
+
+impl std::fmt::Debug for RawPacket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RawPacket").field(&self.classify()).finish()
     }
 }
 
@@ -108,21 +154,18 @@ fn process_device(device: hidapi::HidDevice) -> Result<()> {
 
     loop {
         let _len = device.read(&mut buffer)?;
-        let packet = InitPacket::ref_from(&buffer[..]).ok_or_eyre("invalid packet")?;
+        let packet = RawPacket::ref_from(&buffer[..]).ok_or_eyre("invalid packet")?;
 
-        let _guard = trace_span!("packet",
-            packet.channel = hex::encode(packet.channel),
-            ?packet.command,
-            packet.length = packet.length.get(),
-            packet.payload = hex::encode(packet.payload()),
-        )
-        .entered();
+        let _guard = trace_span!("packet", ?packet).entered();
 
-        match packet.command {
-            Command(0x00..=0x7f) => trace!("ignoring continuation packet"),
-            Command::KEEPALIVE => {
+        match packet.classify() {
+            Packet::Init(InitPacket {
+                command: Command::KEEPALIVE,
+                payload,
+                ..
+            }) => {
                 let keepalive =
-                    KeepAlive::ref_from(packet.payload()).ok_or_eyre("invalid keepalive")?;
+                    KeepAlive::ref_from(&payload[..1]).ok_or_eyre("invalid keepalive")?;
                 let _guard =
                     trace_span!("keepalive", packet.keepalive.status = ?keepalive.status).entered();
 
@@ -131,7 +174,8 @@ fn process_device(device: hidapi::HidDevice) -> Result<()> {
                     _ => trace!("ignoring unhandled keepalive"),
                 }
             }
-            command => trace!("ignoring unhandled command"),
+            Packet::Continuation(_) => trace!("ignoring continuation packet"),
+            Packet::Init(_) => trace!("ignoring unhandled command"),
         }
     }
 }
