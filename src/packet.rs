@@ -1,4 +1,5 @@
-use eyre::{OptionExt, Result};
+use eyre::{OptionExt, Result, WrapErr};
+use std::time::Instant;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, BE, U16};
 
 use crate::command;
@@ -8,7 +9,7 @@ pub(crate) const FIDO_CTAPHID_MAX_RECORD_SIZE: usize = 64;
 
 #[derive(FromZeroes, FromBytes, AsBytes, PartialEq, Eq, Copy, Clone)]
 #[repr(transparent)]
-pub(crate) struct Channel([u8; 4]);
+pub(crate) struct Channel(pub [u8; 4]);
 
 impl std::fmt::Debug for Channel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -75,13 +76,29 @@ impl<'a> Packet<'a> {
     pub(crate) fn read_from(
         device: &hidapi::HidDevice,
         buffer: &'a mut [u8; FIDO_CTAPHID_MAX_RECORD_SIZE],
-    ) -> Result<Self> {
-        let len = device.read(buffer)?;
+        deadline: Option<Instant>,
+    ) -> Result<Option<Self>> {
+        let len = device.read_timeout(
+            buffer,
+            deadline
+                .map(|t| {
+                    i32::try_from(t.saturating_duration_since(Instant::now()).as_millis())
+                        .wrap_err("timeout should always be representable")
+                })
+                .transpose()?
+                .unwrap_or(-1),
+        )?;
+        if len == 0 {
+            // timeout occurred
+            return None;
+        }
         // TODO: support buffers shorter than the max
         assert_eq!(len, buffer.len());
-        RawPacket::ref_from(&buffer[..])
-            .ok_or_eyre("invalid packet")?
-            .into()
+        Some(
+            RawPacket::ref_from(&buffer[..])
+                .ok_or_eyre("invalid packet")?
+                .into(),
+        )
     }
 }
 

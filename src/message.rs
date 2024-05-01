@@ -1,9 +1,11 @@
 use eyre::{bail, ensure, Error, Result};
+use std::time::Instant;
 use tracing::{trace, trace_span};
 
+pub(crate) use crate::packet::Channel;
 use crate::{
     command::{self, Command},
-    packet::{Channel, Init, Packet, FIDO_CTAPHID_MAX_RECORD_SIZE},
+    packet::{Init, Packet, FIDO_CTAPHID_MAX_RECORD_SIZE},
 };
 
 // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#usb-message-and-packet-structure
@@ -32,10 +34,13 @@ impl<'a> Message<'a> {
     pub(crate) fn read_from(
         device: &hidapi::HidDevice,
         buffer: &'a mut [u8; FIDO_CTAPHID_MAX_MESSAGE_SIZE],
-    ) -> Result<Self> {
+        deadline: Option<Instant>,
+    ) -> Result<Option<Self>> {
         let mut pbuffer = [0; FIDO_CTAPHID_MAX_RECORD_SIZE];
         let init = loop {
-            let packet = Packet::read_from(device, &mut pbuffer)?;
+            let Some(packet) = Packet::read_from(device, &mut pbuffer, deadline)? else {
+                return None;
+            };
             let _guard = trace_span!("packet", ?packet).entered();
 
             let Packet::Init(init) = packet else {
@@ -68,7 +73,9 @@ impl<'a> Message<'a> {
         let mut sequence = 0;
 
         while offset < length {
-            let packet = Packet::read_from(device, &mut pbuffer)?;
+            let Some(packet) = Packet::read_from(device, &mut pbuffer, deadline)? else {
+                return None;
+            };
             let _guard = trace_span!("packet", ?packet).entered();
 
             let Packet::Continuation(continuation) = packet else {
@@ -93,6 +100,6 @@ impl<'a> Message<'a> {
             sequence += 1;
         }
 
-        Self::try_from((channel, command, &buffer[..length]))?
+        Some(Self::try_from((channel, command, &buffer[..length]))?)
     }
 }
