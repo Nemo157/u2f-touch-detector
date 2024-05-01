@@ -1,9 +1,7 @@
-use eyre::{OptionExt, Result};
+use eyre::Result;
 use tracing::{info, info_span, trace, trace_span};
-use zerocopy::FromBytes;
 
-use crate::message::{Message, FIDO_CTAPHID_MAX_MESSAGE_SIZE};
-use crate::packet::{Command, KeepAlive, Status};
+use crate::message::{Command, Message, Status, FIDO_CTAPHID_MAX_MESSAGE_SIZE};
 
 // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#usb-discovery
 const FIDO_USAGE_PAGE: u16 = 0xf1d0;
@@ -54,21 +52,13 @@ impl Device {
 
         loop {
             let message = Message::read_from(&self.0, &mut buffer)?;
-            let _guard = trace_span!("message", ?message.channel, ?message.command, message.payload = hex::encode(message.payload)).entered();
+            let _guard = trace_span!("message", ?message.channel, ?message.command).entered();
 
             match message.command {
-                Command::KEEPALIVE => {
-                    let keepalive =
-                        KeepAlive::ref_from(message.payload).ok_or_eyre("invalid keepalive")?;
-                    let _guard =
-                        trace_span!("keepalive", message.keepalive.status = ?keepalive.status)
-                            .entered();
-
-                    match keepalive.status {
-                        Status::UPNEEDED => info!("touch needed"),
-                        _ => trace!("ignoring unhandled keepalive"),
-                    }
-                }
+                Command::KeepAlive(keepalive) => match keepalive.status {
+                    Status::UPNEEDED => info!("touch needed"),
+                    _ => trace!("ignoring unhandled keepalive"),
+                },
                 _ => trace!("ignoring unhandled command"),
             }
         }

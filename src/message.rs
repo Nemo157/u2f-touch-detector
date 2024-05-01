@@ -1,23 +1,91 @@
-use crate::packet::{Channel, Command, Init, Packet, FIDO_CTAPHID_MAX_RECORD_SIZE};
-use eyre::{bail, ensure, Result};
+use eyre::{bail, ensure, Error, OptionExt, Result};
 use tracing::{trace, trace_span};
+use zerocopy::{FromBytes, FromZeroes};
+
+pub(crate) use crate::packet::{Channel, CommandKind};
+use crate::packet::{Init, Packet, FIDO_CTAPHID_MAX_RECORD_SIZE};
 
 // https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#usb-message-and-packet-structure
 pub(crate) const FIDO_CTAPHID_MAX_MESSAGE_SIZE: usize = 127 * FIDO_CTAPHID_MAX_RECORD_SIZE;
 
-pub(crate) struct Message<'a> {
-    pub(crate) channel: Channel,
-    pub(crate) command: Command,
-    pub(crate) payload: &'a [u8],
+#[derive(FromZeroes, FromBytes, PartialEq, Eq, Copy, Clone)]
+#[repr(transparent)]
+pub(crate) struct Status(u8);
+
+impl Status {
+    // The authenticator is still processing the current request
+    pub(crate) const PROCESSING: Self = Self(1);
+    // The authenticator is waiting for user presence
+    pub(crate) const UPNEEDED: Self = Self(2);
 }
 
-impl std::fmt::Debug for Message<'_> {
+impl std::fmt::Debug for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Message")
-            .field("channel", &self.channel)
-            .field("command", &self.command)
-            .field("payload", &hex::encode(self.payload))
-            .finish()
+        let name = match *self {
+            Self::PROCESSING => "Processing",
+            Self::UPNEEDED => "UserPresenceNeeded",
+            _ => "Status::Unknown",
+        };
+        write!(f, "{name}({})", self.0)
+    }
+}
+
+#[derive(FromZeroes, FromBytes, Debug)]
+#[repr(C)]
+pub(crate) struct KeepAlive {
+    pub(crate) status: Status,
+}
+
+pub(crate) enum Command<'a> {
+    KeepAlive(&'a KeepAlive),
+    Other {
+        kind: CommandKind,
+        payload: &'a [u8],
+    },
+}
+
+impl<'a> TryFrom<(CommandKind, &'a [u8])> for Command<'a> {
+    type Error = Error;
+
+    #[culpa::try_fn]
+    fn try_from((kind, payload): (CommandKind, &'a [u8])) -> Result<Self> {
+        match kind {
+            CommandKind::KEEPALIVE => {
+                Self::KeepAlive(KeepAlive::ref_from(payload).ok_or_eyre("invalid keepalive")?)
+            }
+            _ => Self::Other { kind, payload },
+        }
+    }
+}
+
+impl std::fmt::Debug for Command<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::KeepAlive(keepalive) => keepalive.fmt(f),
+            Self::Other { kind, payload } => f
+                .debug_struct("Other")
+                .field("kind", &kind)
+                .field("payload", &hex::encode(payload))
+                .finish(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Message<'a> {
+    pub(crate) channel: Channel,
+    pub(crate) command: Command<'a>,
+}
+
+impl<'a> TryFrom<(Channel, CommandKind, &'a [u8])> for Message<'a> {
+    type Error = Error;
+
+    #[culpa::try_fn]
+    fn try_from((channel, kind, payload): (Channel, CommandKind, &'a [u8])) -> Result<Self> {
+        Self {
+            channel,
+            command: Command::try_from((kind, payload))?,
+        }
     }
 }
 
@@ -87,10 +155,6 @@ impl<'a> Message<'a> {
             sequence += 1;
         }
 
-        Self {
-            channel,
-            command,
-            payload: &buffer[..length],
-        }
+        Self::try_from((channel, command, &buffer[..length]))?
     }
 }

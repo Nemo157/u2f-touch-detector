@@ -16,9 +16,9 @@ impl std::fmt::Debug for Channel {
 
 #[derive(FromZeroes, FromBytes, PartialEq, Eq, Copy, Clone)]
 #[repr(transparent)]
-pub(crate) struct Command(u8);
+pub(crate) struct CommandKind(u8);
 
-impl Command {
+impl CommandKind {
     pub(crate) const KEEPALIVE: Self = Self(0x80 | 0x3b);
     pub(crate) const MSG: Self = Self(0x80 | 0x03);
     pub(crate) const CBOR: Self = Self(0x80 | 0x10);
@@ -30,7 +30,7 @@ impl Command {
     pub(crate) const LOCK: Self = Self(0x80 | 0x04);
 }
 
-impl std::fmt::Debug for Command {
+impl std::fmt::Debug for CommandKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match *self {
             Self(0..=0x7f) => return write!(f, "invalid continuation treated as command"),
@@ -54,7 +54,7 @@ impl std::fmt::Debug for Command {
 #[repr(C)]
 pub(crate) struct Init {
     pub(crate) channel: Channel,
-    pub(crate) command: Command,
+    pub(crate) command: CommandKind,
     pub(crate) length: U16<BE>,
     // TODO: should be [u8], but zerocopy doesn't seem to have helpers for unsized types
     pub(crate) payload: [u8; FIDO_CTAPHID_MAX_RECORD_SIZE - 7],
@@ -115,7 +115,17 @@ impl<'a> Packet<'a> {
         assert_eq!(len, buffer.len());
         RawPacket::ref_from(&buffer[..])
             .ok_or_eyre("invalid packet")?
-            .classify()
+            .into()
+    }
+}
+
+impl<'a> From<&'a RawPacket> for Packet<'a> {
+    fn from(raw: &'a RawPacket) -> Self {
+        if raw.sequence_or_command < 0x80 {
+            Self::Continuation(Continuation::ref_from(raw.as_bytes()).unwrap())
+        } else {
+            Self::Init(Init::ref_from(raw.as_bytes()).unwrap())
+        }
     }
 }
 
@@ -126,48 +136,4 @@ struct RawPacket {
     sequence_or_command: u8,
     // TODO: should be [u8], but zerocopy doesn't seem to have helpers for unsized types
     payload: [u8; FIDO_CTAPHID_MAX_RECORD_SIZE - 5],
-}
-
-impl RawPacket {
-    fn classify(&self) -> Packet<'_> {
-        if self.sequence_or_command < 0x80 {
-            Packet::Continuation(Continuation::ref_from(self.as_bytes()).unwrap())
-        } else {
-            Packet::Init(Init::ref_from(self.as_bytes()).unwrap())
-        }
-    }
-}
-
-impl std::fmt::Debug for RawPacket {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RawPacket").field(&self.classify()).finish()
-    }
-}
-
-#[derive(FromZeroes, FromBytes, PartialEq, Eq, Copy, Clone)]
-#[repr(transparent)]
-pub(crate) struct Status(u8);
-
-impl Status {
-    // The authenticator is still processing the current request
-    pub(crate) const PROCESSING: Self = Self(1);
-    // The authenticator is waiting for user presence
-    pub(crate) const UPNEEDED: Self = Self(2);
-}
-
-impl std::fmt::Debug for Status {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match *self {
-            Self::PROCESSING => "Processing",
-            Self::UPNEEDED => "UserPresenceNeeded",
-            _ => "Status::Unknown",
-        };
-        write!(f, "{name}({})", self.0)
-    }
-}
-
-#[derive(FromZeroes, FromBytes, Debug)]
-#[repr(C)]
-pub(crate) struct KeepAlive {
-    pub(crate) status: Status,
 }
