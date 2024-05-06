@@ -1,5 +1,10 @@
 use clap::Parser;
 use eyre::Result;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    time::Duration,
+};
+use tracing::{debug, info, info_span, warn};
 use tracing_subscriber::{filter::LevelFilter, layer::SubscriberExt, EnvFilter};
 
 mod command;
@@ -9,6 +14,8 @@ mod packet;
 mod socket;
 
 use crate::device::Device;
+
+const NEW_DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Parser)]
 #[command(version, disable_help_subcommand = true)]
@@ -39,31 +46,53 @@ fn main() -> Result<()> {
 
     let app = App::parse();
 
-    let mut threads = Vec::new();
-
     let (tx, _) = tokio::sync::broadcast::channel(1);
 
     if let Some(socket) = app.socket {
-        tracing::info!(?socket, "starting socket output with config");
-        threads.push(std::thread::spawn({
+        info!(?socket, "starting socket output with config");
+        std::thread::spawn({
             let rx = tx.subscribe();
             move || socket::run(socket, rx)
-        }));
+        });
     }
 
-    let hidapi = hidapi::HidApi::new()?;
-    for device in Device::find(&hidapi) {
-        threads.push(std::thread::spawn({
-            let device = device?;
-            let tx = tx.clone();
-            move || device.process_messages(tx)
-        }));
-    }
+    let mut hidapi = hidapi::HidApi::new_without_enumerate()?;
+    let mut threads = HashMap::new();
 
-    for thread in threads {
-        match thread.join() {
-            Ok(result) => result?,
-            Err(panic) => std::panic::resume_unwind(panic),
+    loop {
+        debug!("polling for new devices");
+
+        hidapi.refresh_devices()?;
+
+        for device in Device::find(&hidapi) {
+            match device {
+                Ok(device) => {
+                    let _guard = info_span!("device", %device.serial).entered();
+
+                    match threads.entry(device.path().to_owned()) {
+                        Entry::Vacant(entry) => {
+                            info!("adding new device");
+                            entry.insert(std::thread::spawn({
+                                let tx = tx.clone();
+                                move || {
+                                    let _guard = info_span!("device", %device.serial).entered();
+                                    if let Err(err) = device.process_messages(tx) {
+                                        info!("device thread died (probably removed): {err:?}");
+                                    }
+                                }
+                            }));
+                        }
+                        Entry::Occupied(_) => {
+                            debug!("device is already known");
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!("error encountered polling devices: {err:?}");
+                }
+            }
         }
+        std::thread::sleep(NEW_DEVICE_POLL_INTERVAL);
+        threads.retain(|_, thread| !thread.is_finished());
     }
 }

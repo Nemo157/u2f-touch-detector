@@ -1,9 +1,10 @@
-use eyre::Result;
+use camino::{Utf8Path, Utf8PathBuf};
+use eyre::{eyre, Result};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tracing::{info, info_span, trace, trace_span};
+use tracing::{debug, info, info_span, trace, trace_span};
 
 use crate::command::{self, Command, Status};
 use crate::message::{Channel, Message, FIDO_CTAPHID_MAX_MESSAGE_SIZE};
@@ -21,7 +22,11 @@ const FIDO_USAGE_CTAPHID: u16 = 0x01;
 // state back and forth during a single transaction.
 const HYSTERESIS_DURATION: Duration = std::time::Duration::from_millis(400);
 
-pub(crate) struct Device(hidapi::HidDevice);
+pub(crate) struct Device {
+    pub(crate) path: Utf8PathBuf,
+    pub(crate) serial: Arc<str>,
+    device: hidapi::HidDevice,
+}
 
 impl Device {
     pub(crate) fn find(hidapi: &hidapi::HidApi) -> impl Iterator<Item = Result<Self>> + '_ {
@@ -32,26 +37,42 @@ impl Device {
         std::iter::from_fn(move || {
             let info = devices.next()?;
 
+            let Ok(path) = info.path().to_str() else {
+                return Some(Err(eyre!("device has non-utf8 path: {:?}", info.path())));
+            };
+
+            let path = Utf8PathBuf::from(path);
+            let serial = Arc::<str>::from(info.serial_number().unwrap_or_default());
+
             let _guard = info_span!(
                 "device",
-                device.serial = info.serial_number().unwrap_or_default()
+                device.serial = %serial
             )
             .entered();
 
-            info!(
+            debug!(
                 device.manufacturer = info.manufacturer_string().unwrap_or_default(),
                 device.product = info.product_string().unwrap_or_default(),
                 device.id.vendor = format!("{:4x}", info.vendor_id()),
                 device.id.product = format!("{:4x}", info.product_id()),
+                device.path = %path,
                 "found device"
             );
 
             Some(
                 info.open_device(hidapi)
-                    .map(Self)
+                    .map(|device| Self {
+                        path,
+                        serial,
+                        device,
+                    })
                     .map_err(eyre::Error::from),
             )
         })
+    }
+
+    pub(crate) fn path(&self) -> &Utf8Path {
+        &self.path
     }
 
     #[culpa::try_fn]
@@ -59,20 +80,17 @@ impl Device {
         &self,
         tx: tokio::sync::broadcast::Sender<(Arc<str>, bool)>,
     ) -> Result<()> {
-        let serial = self.0.get_serial_number_string()?.unwrap_or_default();
-        let _guard = info_span!("device", device.serial = serial).entered();
-        let serial = Arc::<str>::from(serial);
-
         let mut buffer = [0; FIDO_CTAPHID_MAX_MESSAGE_SIZE];
 
         let mut deadline = None;
         let mut channel = Channel([0; 4]);
         loop {
-            let Some(message) = Message::read_from(&self.0, &mut buffer, deadline)? else {
+            let Some(message) = Message::read_from(&self.device, &mut buffer, deadline)? else {
+                trace!("no response");
                 if deadline.map(|d| Instant::now() >= d).unwrap_or(false) {
                     trace!("hit deadline, assume device gave up");
                     info!("touch no longer needed");
-                    let _ = tx.send((serial.clone(), false));
+                    let _ = tx.send((self.serial.clone(), false));
                     deadline = None;
                 }
                 continue;
@@ -85,7 +103,7 @@ impl Device {
                     Status::UPNEEDED => {
                         if deadline.is_none() {
                             info!("touch needed");
-                            let _ = tx.send((serial.clone(), true));
+                            let _ = tx.send((self.serial.clone(), true));
                         }
                         deadline = Some(Instant::now() + HYSTERESIS_DURATION);
                         channel = message.channel;
@@ -106,7 +124,7 @@ impl Device {
                 } if deadline.is_some() => {
                     trace!("received a response, clearing deadline");
                     info!("touch no longer needed");
-                    let _ = tx.send((serial.clone(), false));
+                    let _ = tx.send((self.serial.clone(), false));
                     deadline = None;
                 }
                 _ => trace!("ignoring unhandled command"),
