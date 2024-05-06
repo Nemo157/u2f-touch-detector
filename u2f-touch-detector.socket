@@ -1,0 +1,10 @@
+[Unit]
+Description=Unix socket activation for U2F touch detector service
+
+[Socket]
+ListenStream=%t/u2f-touch-detector.socket
+SocketMode=0600
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target
