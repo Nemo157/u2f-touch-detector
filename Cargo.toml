@@ -22,3 +22,6 @@ tracing = { version = "0.1.37", default-features = false, features = ["attribute
 tracing-error = { version = "0.2.0", default-features = false }
 tracing-subscriber = { version = "0.3.17", default-features = false, features = ["env-filter", "fmt", "ansi", "tracing-log"] }
 zerocopy = { version = "0.7.32", features = ["derive"] }
+
+[patch.crates-io]
+hidapi = { git = "https://github.com/Nemo157/hidapi-rs", branch = "monitor-linux-native" }

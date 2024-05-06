@@ -1,9 +1,6 @@
 use clap::Parser;
 use eyre::Result;
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    time::Duration,
-};
+use std::collections::{hash_map::Entry, HashMap};
 use tracing::{debug, info, info_span, warn};
 use tracing_subscriber::{filter::LevelFilter, layer::SubscriberExt, EnvFilter};
 
@@ -16,8 +13,6 @@ mod packet;
 mod socket;
 
 use crate::{config::Config, device::Device};
-
-const NEW_DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Parser)]
 #[command(version, disable_help_subcommand = true)]
@@ -72,43 +67,52 @@ fn main() -> Result<()> {
         });
     }
 
-    let mut hidapi = hidapi::HidApi::new_without_enumerate()?;
     let mut threads = HashMap::new();
 
-    loop {
-        debug!("polling for new devices");
+    let hidapi1 = hidapi::HidApi::new_without_enumerate()?;
+    let mut hidapi2 = hidapi::HidApi::new_without_enumerate()?;
 
-        hidapi.refresh_devices()?;
+    // Create the monitor before enumerating existing devices so that we get duplicates if a device
+    // is plugged in during enumeration instead of missing it
+    let monitor = Device::monitor(&hidapi1)?;
 
-        for device in Device::find(&hidapi) {
-            match device {
-                Ok(device) => {
-                    let _guard = info_span!("device", %device.serial).entered();
+    hidapi2.add_devices(0, 0)?;
 
-                    match threads.entry(device.path().to_owned()) {
-                        Entry::Vacant(entry) => {
-                            info!("adding new device");
-                            entry.insert(std::thread::spawn({
-                                let tx = tx.clone();
-                                move || {
-                                    let _guard = info_span!("device", %device.serial).entered();
-                                    if let Err(err) = device.process_messages(tx) {
-                                        info!("device thread died (probably removed): {err:?}");
-                                    }
-                                }
-                            }));
-                        }
-                        Entry::Occupied(_) => {
+    let create_thread = |device: Device| {
+        std::thread::spawn({
+            let tx = tx.clone();
+            move || {
+                let _guard = info_span!("device", %device.serial).entered();
+                if let Err(err) = device.process_messages(tx) {
+                    info!("device thread died (probably removed): {err:?}");
+                }
+            }
+        })
+    };
+
+    for device in Device::enumerate(&hidapi2).chain(monitor) {
+        match device {
+            Ok(device) => {
+                let _guard = info_span!("device", %device.serial).entered();
+
+                match threads.entry(device.path().to_owned()) {
+                    Entry::Vacant(entry) => {
+                        info!("adding new device");
+                        entry.insert(create_thread(device));
+                    }
+                    Entry::Occupied(mut entry) => {
+                        if entry.get().is_finished() {
+                            info!("re-adding device");
+                            entry.insert(create_thread(device));
+                        } else {
                             debug!("device is already known");
                         }
                     }
                 }
-                Err(err) => {
-                    warn!("error encountered polling devices: {err:?}");
-                }
+            }
+            Err(err) => {
+                warn!("error encountered polling devices: {err:?}");
             }
         }
-        std::thread::sleep(NEW_DEVICE_POLL_INTERVAL);
-        threads.retain(|_, thread| !thread.is_finished());
     }
 }

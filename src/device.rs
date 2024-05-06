@@ -1,5 +1,5 @@
 use camino::{Utf8Path, Utf8PathBuf};
-use eyre::{eyre, Result};
+use eyre::{bail, Result};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -29,46 +29,61 @@ pub(crate) struct Device {
 }
 
 impl Device {
-    pub(crate) fn find(hidapi: &hidapi::HidApi) -> impl Iterator<Item = Result<Self>> + '_ {
-        let mut devices = hidapi
+    #[culpa::try_fn]
+    fn from_hidapi(hidapi: &hidapi::HidApi, info: &hidapi::DeviceInfo) -> Result<Self> {
+        let serial = Arc::<str>::from(info.serial_number().unwrap_or_default());
+
+        let _guard = info_span!(
+            "device",
+            device.serial = %serial
+        )
+        .entered();
+
+        let Ok(path) = info.path().to_str().map(Utf8PathBuf::from) else {
+            bail!("device has non-utf8 path: {:?}", info.path());
+        };
+
+        debug!(
+            device.manufacturer = info.manufacturer_string().unwrap_or_default(),
+            device.product = info.product_string().unwrap_or_default(),
+            device.id.vendor = format!("{:4x}", info.vendor_id()),
+            device.id.product = format!("{:4x}", info.product_id()),
+            device.path = %path,
+            "found device"
+        );
+
+        let device = info.open_device(hidapi)?;
+
+        Self {
+            path,
+            serial,
+            device,
+        }
+    }
+
+    pub(crate) fn enumerate(hidapi: &hidapi::HidApi) -> impl Iterator<Item = Result<Self>> + '_ {
+        hidapi
             .device_list()
-            .filter(|dev| dev.usage_page() == FIDO_USAGE_PAGE && dev.usage() == FIDO_USAGE_CTAPHID);
+            .filter(|info| {
+                info.usage_page() == FIDO_USAGE_PAGE && info.usage() == FIDO_USAGE_CTAPHID
+            })
+            .map(|info| Self::from_hidapi(hidapi, info))
+    }
 
-        std::iter::from_fn(move || {
-            let info = devices.next()?;
-
-            let Ok(path) = info.path().to_str() else {
-                return Some(Err(eyre!("device has non-utf8 path: {:?}", info.path())));
-            };
-
-            let path = Utf8PathBuf::from(path);
-            let serial = Arc::<str>::from(info.serial_number().unwrap_or_default());
-
-            let _guard = info_span!(
-                "device",
-                device.serial = %serial
-            )
-            .entered();
-
-            debug!(
-                device.manufacturer = info.manufacturer_string().unwrap_or_default(),
-                device.product = info.product_string().unwrap_or_default(),
-                device.id.vendor = format!("{:4x}", info.vendor_id()),
-                device.id.product = format!("{:4x}", info.product_id()),
-                device.path = %path,
-                "found device"
-            );
-
-            Some(
-                info.open_device(hidapi)
-                    .map(|device| Self {
-                        path,
-                        serial,
-                        device,
-                    })
-                    .map_err(eyre::Error::from),
-            )
-        })
+    #[culpa::try_fn]
+    pub(crate) fn monitor(
+        hidapi: &hidapi::HidApi,
+    ) -> Result<impl Iterator<Item = Result<Self>> + '_> {
+        hidapi
+            .monitor()?
+            .filter_map(|event| match event {
+                hidapi::Event::Add(device) => Some(device),
+                _ => None,
+            })
+            .filter(|info| {
+                info.usage_page() == FIDO_USAGE_PAGE && info.usage() == FIDO_USAGE_CTAPHID
+            })
+            .map(|info| Self::from_hidapi(hidapi, &info))
     }
 
     pub(crate) fn path(&self) -> &Utf8Path {

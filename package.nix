@@ -16,7 +16,12 @@ in rustPlatform.buildRustPackage {
     root = ./.;
     fileset = lib.fileset.difference ./. ignored;
   };
-  cargoLock.lockFile = ./Cargo.lock;
+  cargoLock = {
+      lockFile = ./Cargo.lock;
+      outputHashes = {
+        "hidapi-2.6.1" = "sha256-bRMU/oNxOgkA5yLUAPFBpHUaFO/gxqKwZJHqN/cJtok=";
+      };
+  };
 
   nativeBuildInputs = [ pkg-config ];
   buildInputs = [ udev ];
