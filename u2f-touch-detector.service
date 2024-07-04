@@ -3,7 +3,7 @@ Description=Detects when your U2F dongle is waiting for a touch
 Requires=u2f-touch-detector.socket
 
 [Service]
-ExecStart=u2f-touch-detector --socket=@systemd
+ExecStart=u2f-touch-detector --socket
 Restart=on-failure
 
 [Install]

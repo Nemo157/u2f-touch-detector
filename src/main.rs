@@ -20,10 +20,10 @@ const NEW_DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Debug, Parser)]
 #[command(version, disable_help_subcommand = true)]
 pub(crate) struct App {
-    /// (Optional) Socket to output yubikey-touch-detector compatible events to. Use `@systemd` to
-    /// accept a socket from systemd socket activation, or a path.
+    /// (Optional) Enable socket to output yubikey-touch-detector compatible events to, expects
+    /// the socket to be passed via systemd's socket activation protocol.
     #[arg(long)]
-    socket: Option<socket::Config>,
+    socket: bool,
 }
 
 #[culpa::try_fn]
@@ -48,11 +48,11 @@ fn main() -> Result<()> {
 
     let (tx, _) = tokio::sync::broadcast::channel(1);
 
-    if let Some(socket) = app.socket {
-        info!(?socket, "starting socket output with config");
+    if app.socket {
+        info!("starting socket output");
         std::thread::spawn({
             let rx = tx.subscribe();
-            move || socket::run(socket, rx)
+            move || socket::run(rx)
         });
     }
 
