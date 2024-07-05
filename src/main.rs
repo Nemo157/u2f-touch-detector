@@ -8,12 +8,13 @@ use tracing::{debug, info, info_span, warn};
 use tracing_subscriber::{filter::LevelFilter, layer::SubscriberExt, EnvFilter};
 
 mod command;
+mod config;
 mod device;
 mod message;
 mod packet;
 mod socket;
 
-use crate::device::Device;
+use crate::{config::Config, device::Device};
 
 const NEW_DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -45,6 +46,8 @@ fn main() -> Result<()> {
     )?;
 
     let app = App::parse();
+    let config = Config::load()?;
+    tracing::trace!(?config, "loaded config");
 
     let (tx, _) = tokio::sync::broadcast::channel(1);
 
