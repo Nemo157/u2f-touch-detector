@@ -1,4 +1,5 @@
 use crate::config::ConfigMap;
+use camino::Utf8PathBuf;
 use eyre::Result;
 use notify_rust::{Notification, Timeout, Urgency};
 use std::{
@@ -16,6 +17,9 @@ pub struct DeviceConfig {
 
     /// Override notification message for this device
     message: Option<String>,
+
+    /// Override notification image for this device
+    image: Option<Utf8PathBuf>,
 }
 
 #[derive(confique::Config, Debug)]
@@ -33,6 +37,9 @@ pub struct Config {
     // TODO: Maybe make this use a template string so it's possible to do something like the default
     /// Notification message, default is "Device {serial}"
     message: Option<String>,
+
+    /// Notification image
+    image: Option<Utf8PathBuf>,
 
     /// Override config for a specific device, indexed by device serial number
     #[config(nested)]
@@ -68,12 +75,21 @@ pub(crate) fn run(
                     }
                 };
 
-                let notification = Notification::new()
+                let image = device
+                    .and_then(|d| d.image.as_deref())
+                    .or(config.image.as_deref());
+
+                let mut notification = Notification::new();
+
+                notification
                     .timeout(Timeout::Never)
                     .urgency(Urgency::Critical)
                     .summary(summary)
-                    .body(body)
-                    .finalize();
+                    .body(body);
+
+                if let Some(image) = image {
+                    notification.image_path(image.as_str());
+                }
 
                 match notification.show() {
                     Ok(handle) => {
