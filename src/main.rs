@@ -25,6 +25,10 @@ pub(crate) struct App {
     /// the socket to be passed via systemd's socket activation protocol.
     #[arg(long)]
     socket: bool,
+
+    /// Config overrides to apply, these should be fragments of the config file.
+    #[arg(long = "config-toml", value_name = "TOML", value_parser = toml::from_str::<config::Partial>)]
+    config_fragments: Vec<config::Partial>,
 }
 
 #[culpa::try_fn]
@@ -46,7 +50,7 @@ fn main() -> Result<()> {
     )?;
 
     let app = App::parse();
-    let config = Config::load()?;
+    let config = Config::load(app.config_fragments)?;
     tracing::trace!(?config, "loaded config");
 
     let (tx, _) = tokio::sync::broadcast::channel(1);

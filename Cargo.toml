@@ -16,6 +16,7 @@ hidapi = { version = "2.6.1", default-features = false, features = ["linux-nativ
 listenfd = { version = "1.0.1", default-features = false }
 serde = { version = "1.0.204", features = ["derive", "std"], default-features = false }
 tokio = { version = "1.37.0", default-features = false, features = ["sync"] }
+toml = { version = "0.8.15", default-features = false, features = ["parse"] }
 tracing = { version = "0.1.37", default-features = false, features = ["attributes", "std"] }
 tracing-error = { version = "0.2.0", default-features = false }
 tracing-subscriber = { version = "0.3.17", default-features = false, features = ["env-filter", "fmt", "ansi", "tracing-log"] }
