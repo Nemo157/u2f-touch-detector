@@ -11,6 +11,7 @@ mod command;
 mod config;
 mod device;
 mod message;
+mod notify;
 mod packet;
 mod socket;
 
@@ -60,6 +61,14 @@ fn main() -> Result<()> {
         std::thread::spawn({
             let rx = tx.subscribe();
             move || socket::run(rx)
+        });
+    }
+
+    if config.notify.enable {
+        info!("starting notify output");
+        std::thread::spawn({
+            let rx = tx.subscribe();
+            move || notify::run(config.notify, rx)
         });
     }
 

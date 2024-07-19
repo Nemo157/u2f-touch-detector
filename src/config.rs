@@ -5,7 +5,11 @@ use eyre::{OptionExt, Result};
 #[derive(confique::Config, Debug)]
 #[config(partial_attr(derive(Clone, Debug)))]
 #[config(partial_attr(serde(deny_unknown_fields, rename_all = "kebab-case")))]
-pub struct Config {}
+pub struct Config {
+    /// Desktop notifications module
+    #[config(nested)]
+    pub notify: crate::notify::Config,
+}
 
 pub type Partial = <Config as confique::Config>::Partial;
 
