@@ -52,11 +52,18 @@ impl<V: confique::Config> confique::Config for ConfigMap<V> {
     };
 
     fn from_partial(partial: Self::Partial) -> Result<Self, confique::Error> {
-        // TODO: this needs to use `confique::internal::map_err_prefix_path` to give the correct path in errors
         let inner: Result<_, confique::Error> = partial
             .inner
             .into_iter()
-            .map(|(k, v)| Ok((k, V::from_partial(v)?)))
+            .map(|(k, v)| {
+                let v = V::from_partial(v).map_err(|e| {
+                    // get the quoted form of the key if needed
+                    let key = toml::to_string(&BTreeMap::from_iter([(&k, true)])).unwrap();
+                    let key = key.strip_suffix(" = true\n").unwrap();
+                    confique::internal::map_err_prefix_path::<()>(Err(e), key).unwrap_err()
+                })?;
+                Ok((k, v))
+            })
             .collect();
         Ok(Self { inner: inner? })
     }
