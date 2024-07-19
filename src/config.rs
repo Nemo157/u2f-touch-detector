@@ -1,8 +1,8 @@
 use confique::Config as _;
 use directories::ProjectDirs;
 use eyre::{OptionExt, Result};
-use serde::de::{Deserialize, DeserializeOwned, Deserializer};
-use std::{collections::HashMap, hash::Hash};
+use serde::de::{Deserialize, Deserializer};
+use std::collections::BTreeMap;
 
 #[derive(confique::Config, Debug)]
 #[config(partial_attr(derive(Clone, Debug)))]
@@ -33,17 +33,17 @@ impl Config {
 }
 
 #[derive(Debug)]
-pub struct ConfigMap<K: DeserializeOwned + Eq + Hash, V: confique::Config> {
-    pub inner: HashMap<K, V>,
+pub struct ConfigMap<V: confique::Config> {
+    pub inner: BTreeMap<String, V>,
 }
 
 #[derive(Debug)]
-pub struct ConfigMapPartial<K: DeserializeOwned + Eq + Hash, V: confique::Partial> {
-    pub inner: HashMap<K, V>,
+pub struct ConfigMapPartial<V: confique::Partial> {
+    pub inner: BTreeMap<String, V>,
 }
 
-impl<K: DeserializeOwned + Eq + Hash, V: confique::Config> confique::Config for ConfigMap<K, V> {
-    type Partial = ConfigMapPartial<K, V::Partial>;
+impl<V: confique::Config> confique::Config for ConfigMap<V> {
+    type Partial = ConfigMapPartial<V::Partial>;
 
     const META: confique::meta::Meta = confique::meta::Meta {
         name: "",
@@ -62,25 +62,21 @@ impl<K: DeserializeOwned + Eq + Hash, V: confique::Config> confique::Config for 
     }
 }
 
-impl<'de, K: DeserializeOwned + Eq + Hash, V: confique::Partial> Deserialize<'de>
-    for ConfigMapPartial<K, V>
-{
+impl<'de, V: confique::Partial> Deserialize<'de> for ConfigMapPartial<V> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         Ok(Self {
-            inner: HashMap::deserialize(deserializer)?,
+            inner: BTreeMap::deserialize(deserializer)?,
         })
     }
 }
 
-impl<K: DeserializeOwned + Eq + Hash, V: confique::Partial> confique::Partial
-    for ConfigMapPartial<K, V>
-{
+impl<V: confique::Partial> confique::Partial for ConfigMapPartial<V> {
     fn empty() -> Self {
         Self {
-            inner: HashMap::new(),
+            inner: BTreeMap::new(),
         }
     }
 
@@ -113,9 +109,7 @@ impl<K: DeserializeOwned + Eq + Hash, V: confique::Partial> confique::Partial
     }
 }
 
-impl<K: DeserializeOwned + Eq + Hash + Clone, V: confique::Partial + Clone> Clone
-    for ConfigMapPartial<K, V>
-{
+impl<V: confique::Partial + Clone> Clone for ConfigMapPartial<V> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),

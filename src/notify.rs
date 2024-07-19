@@ -36,7 +36,7 @@ pub struct Config {
 
     /// Override config for a specific device, indexed by device serial number
     #[config(nested)]
-    devices: ConfigMap<String, DeviceConfig>,
+    devices: ConfigMap<DeviceConfig>,
 }
 
 #[culpa::try_fn]
