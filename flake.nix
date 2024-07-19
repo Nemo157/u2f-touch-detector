@@ -50,6 +50,12 @@
                 home.stateVersion = "24.05";
                 services.u2f-touch-detector = {
                   enable = true;
+                  settings = {
+                      notify = {
+                          enable = true;
+                          heading = "Bonk!";
+                      };
+                  };
                 };
               };
             };
